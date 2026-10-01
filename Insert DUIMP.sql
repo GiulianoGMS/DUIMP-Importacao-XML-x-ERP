@@ -1,0 +1,190 @@
+DECLARE
+  v_bfile       BFILE;
+  v_clob        CLOB;
+  v_dest_offset INTEGER := 1;
+  v_src_offset  INTEGER := 1;
+  v_lang        INTEGER := 0;
+  v_warning     INTEGER;
+  v_arquivo     VARCHAR2(200) := 'Duimp_26BR00016589107.xml';
+  v_numero      VARCHAR2(20);
+BEGIN
+  v_bfile := BFILENAME('TI', v_arquivo);
+
+  DBMS_LOB.CREATETEMPORARY(v_clob, TRUE);
+  DBMS_LOB.FILEOPEN(v_bfile, DBMS_LOB.FILE_READONLY);
+
+  DBMS_LOB.LOADCLOBFROMFILE(
+    dest_lob     => v_clob,
+    src_bfile    => v_bfile,
+    amount       => DBMS_LOB.LOBMAXSIZE,
+    dest_offset  => v_dest_offset,
+    src_offset   => v_src_offset,
+    bfile_csid   => NLS_CHARSET_ID('UTF8'),
+    lang_context => v_lang,
+    warning      => v_warning
+  );
+
+  DBMS_LOB.FILECLOSE(v_bfile);
+
+  -- Extrai numero da DUIMP para usar como FK nos itens e no delete
+  SELECT EXTRACTVALUE(XMLTYPE(v_clob), '/DUIMP/NUMERODUIMP')
+    INTO v_numero
+    FROM DUAL;
+
+  -- Re-importação: apaga registros anteriores da mesma DUIMP
+  DELETE FROM NAGT_DUIMP_ITENS WHERE NUMERODUIMP = v_numero;
+  DELETE FROM NAGT_DUIMP_CAPA  WHERE NUMERODUIMP = v_numero;
+
+  -- ==================== INSERT CAPA ====================
+  INSERT INTO NAGT_DUIMP_CAPA (
+    NUMERODUIMP, VERSAODUIMP,
+    DATAXML, DATADUIMP, DATADOLAR, DATADESEMBARACO,
+    UFDESEMBARACO, LOCALDESEMBARACO,
+    COTACAODOLAR, TAXASISCOMEX, DESPESASADUANEIRAS,
+    FRETE, SEGURO, IPI, PIS, COFINS, II, ICMS,
+    TOTALMATERIAISDOLAR, MOEDAMLE, VMLE, VMLD,
+    INFOCOMPLEMENTARES, CNPJIMP, TIPOEMB, VLQTDEEMB,
+    XML_ORIGINAL, DTAIMPORTACAO, NMARQUIVO
+  )
+  SELECT
+    X.NUMERODUIMP,
+    X.VERSAODUIMP,
+    TO_DATE(X.DATAXML,          'DD/MM/YYYY HH24:MI:SS'),
+    TO_DATE(X.DATADUIMP,        'DD/MM/YYYY HH24:MI:SS'),
+    TO_DATE(X.DATADOLAR,        'DD/MM/YYYY HH24:MI:SS'),
+    TO_DATE(NULLIF(X.DATADESEMBARACO, ''), 'DD/MM/YYYY HH24:MI:SS'),
+    X.UFDESEMBARACO,
+    X.LOCALDESEMBARACO,
+    X.COTACAODOLAR,
+    X.TAXASISCOMEX,
+    X.DESPESASADUANEIRAS,
+    X.FRETE,
+    X.SEGURO,
+    X.IPI,
+    X.PIS,
+    X.COFINS,
+    X.II,
+    X.ICMS,
+    X.TOTALMATERIAISDOLAR,
+    X.MOEDAMLE,
+    X.VMLE,
+    X.VMLD,
+    X.INFOCOMPLEMENTARES,
+    X.CNPJIMP,
+    X.TIPOEMB,
+    X.VLQTDEEMB, v_clob,
+    SYSDATE,
+    v_arquivo
+  FROM XMLTABLE(
+         '/DUIMP'
+         PASSING XMLTYPE(v_clob)
+         COLUMNS
+           NUMERODUIMP           VARCHAR2(20)  PATH 'NUMERODUIMP',
+           VERSAODUIMP           NUMBER        PATH 'VERSAODUIMP',
+           DATAXML               VARCHAR2(25)  PATH 'DATAXML',
+           DATADUIMP             VARCHAR2(25)  PATH 'DATADUIMP',
+           DATADOLAR             VARCHAR2(25)  PATH 'DATADOLAR',
+           DATADESEMBARACO       VARCHAR2(25)  PATH 'DATADESEMBARACO',
+           UFDESEMBARACO         VARCHAR2(2)   PATH 'UFDESEMBARACO',
+           LOCALDESEMBARACO      VARCHAR2(100) PATH 'LOCALDESEMBARACO',
+           COTACAODOLAR          NUMBER        PATH 'COTACAODOLAR',
+           TAXASISCOMEX          NUMBER        PATH 'TAXASISCOMEX',
+           DESPESASADUANEIRAS    NUMBER        PATH 'DESPESASADUANEIRAS',
+           FRETE                 NUMBER        PATH 'FRETE',
+           SEGURO                NUMBER        PATH 'SEGURO',
+           IPI                   NUMBER        PATH 'IPI',
+           PIS                   NUMBER        PATH 'PIS',
+           COFINS                NUMBER        PATH 'COFINS',
+           II                    NUMBER        PATH 'II',
+           ICMS                  NUMBER        PATH 'ICMS',
+           TOTALMATERIAISDOLAR   NUMBER        PATH 'TOTALMATERIAISDOLAR',
+           MOEDAMLE              VARCHAR2(5)   PATH 'MOEDAMLE',
+           VMLE                  NUMBER        PATH 'VMLE',
+           VMLD                  NUMBER        PATH 'VMLD',
+           INFOCOMPLEMENTARES    VARCHAR2(500) PATH 'INFOCOMPLEMENTARES',
+           CNPJIMP               VARCHAR2(14)  PATH 'CNPJIMP',
+           TIPOEMB               VARCHAR2(50)  PATH 'TIPOEMB',
+           VLQTDEEMB             NUMBER        PATH 'VLQTDEEMB'
+       ) X;
+
+  -- ==================== INSERT ITENS ====================
+  INSERT INTO NAGT_DUIMP_ITENS (
+    NUMERODUIMP, IT,
+    NUMEROADICAO, NUMEROITEM, CODIGO,
+    DESCRICAO, DESCRICAOCOMPLEMENTAR,
+    NCM, UNIDADE, QUANTIDADE, VALORUNITARIODOLAR,
+    PESO_LIQUIDO, PESO_BRUTO,
+    ALIQUOTAPIS, ALIQUOTAPISREDUZIDA,
+    BASECALCULOII, BASECALCULOIPI, BASECALCULOPISCOFINS, BASECALCULOICMS,
+    VALORPIS, ALIQUOTACOFINS, ALIQUOTACOFINSREDUZIDA, VALORCOFINS,
+    ALIQUOTAIPI, VALORIPI, ALIQUOTAII, VALORII,
+    EXPORTADOR, PAISORIGEM, FABRICANTE,
+    CST, CCLASSIF,
+    VALORALIQIBS, VALORALIQICBS, VALORIBSUF, VALORIBSMUN, VALORCBS
+  )
+  SELECT
+    v_numero,
+    X.IT,
+    X.NUMEROADICAO, X.NUMEROITEM, X.CODIGO,
+    X.DESCRICAO, X.DESCRICAOCOMPLEMENTAR,
+    X.NCM, X.UNIDADE, X.QUANTIDADE, X.VALORUNITARIODOLAR,
+    X.PESO_LIQUIDO, X.PESO_BRUTO,
+    X.ALIQUOTAPIS, X.ALIQUOTAPISREDUZIDA,
+    X.BASECALCULOII, X.BASECALCULOIPI, X.BASECALCULOPISCOFINS, X.BASECALCULOICMS,
+    X.VALORPIS, X.ALIQUOTACOFINS, X.ALIQUOTACOFINSREDUZIDA, X.VALORCOFINS,
+    X.ALIQUOTAIPI, X.VALORIPI, X.ALIQUOTAII, X.VALORII,
+    X.EXPORTADOR, X.PAISORIGEM, X.FABRICANTE,
+    X.CST, X.CCLASSIF,
+    X.VALORALIQIBS, X.VALORALIQICBS, X.VALORIBSUF, X.VALORIBSMUN, X.VALORCBS
+  FROM XMLTABLE(
+         '/DUIMP/PRODUTOS/ITEM'
+         PASSING XMLTYPE(v_clob)
+         COLUMNS
+           IT                     NUMBER         PATH '@IT',
+           NUMEROADICAO           VARCHAR2(3)    PATH 'NUMEROADICAO',
+           NUMEROITEM             VARCHAR2(4)    PATH 'NUMEROITEM',
+           CODIGO                 NUMBER         PATH 'CODIGO',
+           DESCRICAO              VARCHAR2(500)  PATH 'DESCRICAO',
+           DESCRICAOCOMPLEMENTAR  VARCHAR2(2000) PATH 'DESCRICAOCOMPLEMENTAR',
+           NCM                    VARCHAR2(10)   PATH 'NCM',
+           UNIDADE                VARCHAR2(5)    PATH 'UNIDADE',
+           QUANTIDADE             NUMBER         PATH 'QUANTIDADE',
+           VALORUNITARIODOLAR     NUMBER         PATH 'VALORUNITARIODOLAR',
+           PESO_LIQUIDO           NUMBER         PATH 'PESO_LIQUIDO',
+           PESO_BRUTO             NUMBER         PATH 'PESO_BRUTO',
+           ALIQUOTAPIS            NUMBER         PATH 'ALIQUOTAPIS',
+           ALIQUOTAPISREDUZIDA    NUMBER         PATH 'ALIQUOTAPISREDUZIDA',
+           BASECALCULOII          NUMBER         PATH 'BASECALCULOII',
+           BASECALCULOIPI         NUMBER         PATH 'BASECALCULOIPI',
+           BASECALCULOPISCOFINS   NUMBER         PATH 'BASECALCULOPISCOFINS',
+           BASECALCULOICMS        NUMBER         PATH 'BASECALCULOICMS',
+           VALORPIS               NUMBER         PATH 'VALORPIS',
+           ALIQUOTACOFINS         NUMBER         PATH 'ALIQUOTACOFINS',
+           ALIQUOTACOFINSREDUZIDA NUMBER         PATH 'ALIQUOTACOFINSREDUZIDA',
+           VALORCOFINS            NUMBER         PATH 'VALORCOFINS',
+           ALIQUOTAIPI            NUMBER         PATH 'ALIQUOTAIPI',
+           VALORIPI               NUMBER         PATH 'VALORIPI',
+           ALIQUOTAII             NUMBER         PATH 'ALIQUOTAII',
+           VALORII                NUMBER         PATH 'VALORII',
+           EXPORTADOR             VARCHAR2(100)  PATH 'EXPORTADOR',
+           PAISORIGEM             VARCHAR2(50)   PATH 'PAISORIGEM',
+           FABRICANTE             VARCHAR2(100)  PATH 'FABRICANTE',
+           CST                    VARCHAR2(3)    PATH 'CST',
+           CCLASSIF               VARCHAR2(10)   PATH 'CCLASSIF',
+           VALORALIQIBS           NUMBER         PATH 'VALORALIQIBS',
+           VALORALIQICBS          NUMBER         PATH 'VALORALIQICBS',
+           VALORIBSUF             NUMBER         PATH 'VALORIBSUF',
+           VALORIBSMUN            NUMBER         PATH 'VALORIBSMUN',
+           VALORCBS               NUMBER         PATH 'VALORCBS'
+       ) X;
+
+  COMMIT;
+  DBMS_OUTPUT.PUT_LINE('DUIMP ' || v_numero || ' importada com sucesso.');
+
+  DBMS_LOB.FREETEMPORARY(v_clob);
+EXCEPTION
+  WHEN OTHERS THEN
+    ROLLBACK;
+    DBMS_LOB.FREETEMPORARY(v_clob);
+    RAISE;
+END;
