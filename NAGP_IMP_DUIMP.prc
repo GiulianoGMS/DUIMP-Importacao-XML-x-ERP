@@ -1,10 +1,5 @@
-BEGIN
-  NAGP_IMP_DUIMP('26BR00018537074');
-  END;
+CREATE OR REPLACE PROCEDURE NAGP_IMP_DUIMP (psNroDI VARCHAR2) AS
 
-CREATE OR REPLACE PROCEDURE NAGP_IMP_DUIMP (psNroDI VARCHAR2(100)) AS
-
-DECLARE
   v_bfile       BFILE;
   v_clob        CLOB;
   v_dest_offset INTEGER := 1;
@@ -13,8 +8,21 @@ DECLARE
   v_warning     INTEGER;
   v_arquivo     VARCHAR2(200) := 'Duimp_'||psNroDI||'.xml';
   v_numero      VARCHAR2(20);
+  
 BEGIN
-  v_bfile := BFILENAME('DUIMP', v_arquivo);
+  
+    DECLARE
+      v_exists   BOOLEAN;
+      v_flen     NUMBER;
+      v_bsize    NUMBER;
+    BEGIN
+      UTL_FILE.FGETATTR('DUIMP_IMPORTAR', v_arquivo, v_exists, v_flen, v_bsize);
+      IF NOT v_exists THEN
+        RAISE_APPLICATION_ERROR(-20001, 'Arquivo nao encontrado: ' || v_arquivo);
+      END IF;
+    END;
+
+  v_bfile := BFILENAME('DUIMP_IMPORTAR', v_arquivo);
 
   DBMS_LOB.CREATETEMPORARY(v_clob, TRUE);
   DBMS_LOB.FILEOPEN(v_bfile, DBMS_LOB.FILE_READONLY);
@@ -184,10 +192,20 @@ BEGIN
            VALORCBS               NUMBER         PATH 'VALORCBS'
        ) X;
 
-  COMMIT;
+    COMMIT;
   DBMS_OUTPUT.PUT_LINE('DUIMP ' || v_numero || ' importada com sucesso.');
 
   DBMS_LOB.FREETEMPORARY(v_clob);
+
+  -- Mover para processados — falha aqui não afeta os dados já commitados
+  BEGIN
+    UTL_FILE.FCOPY('DUIMP_IMPORTAR', v_arquivo, 'DUIMP_PROCESSADOS', v_arquivo);
+    UTL_FILE.FREMOVE('DUIMP_IMPORTAR', v_arquivo);
+  EXCEPTION
+    WHEN OTHERS THEN
+      DBMS_OUTPUT.PUT_LINE('AVISO: arquivo nao movido — ' || SQLERRM);
+  END;
+
 EXCEPTION
   WHEN OTHERS THEN
     ROLLBACK;
